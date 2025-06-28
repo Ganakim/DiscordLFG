@@ -1,0 +1,16 @@
+{
+  "name": "discordpartyfinder",
+  "version": "1.0.0",
+  "description": "A Discord bot for creating Looking for Group parties",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["discord", "bot", "lfg", "gaming"],
+  "author": "QueenOfMischief",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.21.0",
+    "dotenv": "^16.6.1"
+  }
+}
