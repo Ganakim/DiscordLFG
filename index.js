@@ -58,64 +58,68 @@ async function registerCommands(){
   }
 }
 
+const remakeRolesChannel = false
+
 // Bot ready event
 client.once('ready', async()=>{
   console.log(`Logged in as ${client.user.tag}!`)
   await registerCommands()
-  const guild = client.guilds.cache.first()
-  // the "get-roles" channel should have a few specific messages. The first is about color roles, the second is for game roles. There should be no other messages.
-  const getRolesChannel = guild.channels.cache.find(c=>c.name === 'get-roles')
-  if(!getRolesChannel) return
-  // remove any existing messages in the channel
-  const messages = await getRolesChannel.messages.fetch()
-  await Promise.all(messages.map(message=>message.delete()))
-  const colors = ['Red', 'Green', 'Blue', 'Yellow', 'Orange', 'Purple', 'Teal', 'Pink']
-  const colorSelectMenu = new ActionRowBuilder()
-    .addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('select_color_role')
-        .setPlaceholder('Select your color role...')
-        .addOptions(
-          colors.map(color=>({
-            label: `${color}`,
-            value: color
-          }))
-        )
-    )
+  if(remakeRolesChannel){
+    const guild = client.guilds.cache.first()
+    // the "get-roles" channel should have a few specific messages. The first is about color roles, the second is for game roles. There should be no other messages.
+    const getRolesChannel = guild.channels.cache.find(c=>c.name === 'get-roles')
+    if(!getRolesChannel) return
+    // remove any existing messages in the channel
+    const messages = await getRolesChannel.messages.fetch()
+    await Promise.all(messages.map(message=>message.delete()))
+    const colors = ['Red', 'Green', 'Blue', 'Yellow', 'Orange', 'Purple', 'Teal', 'Pink']
+    const colorSelectMenu = new ActionRowBuilder()
+      .addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('select_color_role')
+          .setPlaceholder('Select your color role...')
+          .addOptions(
+            colors.map(color=>({
+              label: `${color}`,
+              value: color
+            }))
+          )
+      )
 
-  await getRolesChannel.send({
-    embeds: [{
-      title: '🎨 Color Role',
-      description: '🌈 Changes the color of your username in the server! 🌈',
-      color: 0x5865F2
-    }],
-    components: [colorSelectMenu]
-  })
+    await getRolesChannel.send({
+      embeds: [{
+        title: '🎨 Color Role',
+        description: '🌈 Changes the color of your username in the server! 🌈',
+        color: 0x5865F2
+      }],
+      components: [colorSelectMenu]
+    })
 
-  const gameRoles = getGameRoles(guild)
-  const gameSelectMenu = new ActionRowBuilder()
-    .addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('select_game_roles')
-        .setPlaceholder('Select your game roles...')
-        .setMinValues(0)
-        .setMaxValues(gameRoles.size)
-        .addOptions(
-          gameRoles.map(role=>({
-            label: `${role.name}`,
-            value: role.id
-          }))
-        )
-    )
+    const gameRoles = getGameRoles(guild)
+    const gameSelectMenu = new ActionRowBuilder()
+      .addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('select_game_roles')
+          .setPlaceholder('Select your game roles...')
+          .setMinValues(0)
+          .setMaxValues(gameRoles.size)
+          .addOptions(
+            gameRoles.map(role=>({
+              label: `${role.name}`,
+              value: role.id
+            }))
+          )
+      )
 
-  await getRolesChannel.send({
-    embeds: [{
-      title: '🎮 Game Roles',
-      description: '📢 Get notified when people are looking for a group! 📢',
-      color: 0x5865F2
-    }],
-    components: [gameSelectMenu]
-  })
+    await getRolesChannel.send({
+      embeds: [{
+        title: '🎮 Game Roles',
+        description: '📢 Get notified when people are looking for a group! 📢',
+        color: 0x5865F2
+      }],
+      components: [gameSelectMenu]
+    })
+  }
 })
 
 // Handle regular messages - delete them if they're in the lfg channel
@@ -388,7 +392,7 @@ async function cleanupParty(userId, partyName, guild){
     const lfgMessageChannel = guild.channels.cache.get(topic[0])
     const lfgMessage = await lfgMessageChannel.messages.fetch(topic[1])
 
-    if(lfgMessage.author.id !== userId) return false
+    if(lfgMessage.interaction.user.id !== userId) return false
 
     await textChannel.delete()
     await voiceChannel.delete()
