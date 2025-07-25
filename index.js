@@ -177,8 +177,8 @@ client.on('interactionCreate', async interaction=>{
       }
       await handleLFGCommand(interaction)
     }else if(interaction.commandName === 'close_party'){
-      await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
-      await cleanupParty(interaction.options.getString('category'), interaction.guild)
+      const closed = await cleanupParty(interaction.user.id, interaction.options.getString('category'), interaction.guild)
+      if(closed) await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
     }else if(interaction.commandName === 'role'){
       // can have 4 sub commands, add(adds the role to the user), remove(removes it from them), create(admins only, creates a role), destroy(admins only, deletes a role)
       const subCommand = interaction.options.getSubcommand()
@@ -229,8 +229,8 @@ client.on('interactionCreate', async interaction=>{
   }else if(interaction.isButton()){
     if(interaction.customId.startsWith('close_party_')){
       const partyId = interaction.customId.replace('close_party_', '')
-      await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
-      await cleanupParty(partyId, interaction.guild)
+      const closed = await cleanupParty(interaction.user.id, partyId, interaction.guild)
+      if(closed) await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
     }
   }else if(interaction.isStringSelectMenu()){
     if(interaction.customId === 'select_game_roles'){
@@ -352,7 +352,7 @@ async function handleLFGCommand(interaction){
         setTimeout(()=>{
           const vcRecheck = guild.channels.cache.get(voiceChannel.id)
           if(!vcRecheck || vcRecheck.members.size === 0){
-            cleanupParty(partyName, guild)
+            cleanupParty(interaction.user.id, partyName, guild)
             clearInterval(checkEmpty)
           }
         }, 30000) // Wait 30 seconds before cleanup
@@ -374,7 +374,8 @@ async function handleLFGCommand(interaction){
 }
 
 // Clean up party channels
-async function cleanupParty(partyName, guild){
+async function cleanupParty(userId, partyName, guild){
+  if(!userId) return
   if(!partyName) return
   if(!guild) return
 
@@ -387,10 +388,14 @@ async function cleanupParty(partyName, guild){
     const lfgMessageChannel = guild.channels.cache.get(topic[0])
     const lfgMessage = await lfgMessageChannel.messages.fetch(topic[1])
 
+    if(lfgMessage.author.id !== userId) return false
+
     await textChannel.delete()
     await voiceChannel.delete()
     await lfgMessage.delete()
     await category.delete()
+
+    return true
   }catch(error){
     console.error('Error cleaning up party:', error)
   }
