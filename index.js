@@ -182,7 +182,9 @@ client.on('interactionCreate', async interaction=>{
       await handleLFGCommand(interaction)
     }else if(interaction.commandName === 'close_party'){
       const closed = await cleanupParty(interaction.user.id, interaction.options.getString('category'), interaction.guild)
-      if(closed) await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
+      if(!closed) return
+      console.log(`Party closed: ${interaction.options.getString('category')} by ${interaction.user.tag}`)
+      await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
     }else if(interaction.commandName === 'role'){
       // can have 4 sub commands, add(adds the role to the user), remove(removes it from them), create(admins only, creates a role), destroy(admins only, deletes a role)
       const subCommand = interaction.options.getSubcommand()
@@ -234,7 +236,9 @@ client.on('interactionCreate', async interaction=>{
     if(interaction.customId.startsWith('close_party_')){
       const partyId = interaction.customId.replace('close_party_', '')
       const closed = await cleanupParty(interaction.user.id, partyId, interaction.guild)
-      if(closed) await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
+      if(!closed) return
+      console.log(`Party closed: ${partyId} by ${interaction.user.tag}`)
+      await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
     }
   }else if(interaction.isStringSelectMenu()){
     if(interaction.customId === 'select_game_roles'){
@@ -276,6 +280,20 @@ client.on('interactionCreate', async interaction=>{
           flags: MessageFlags.Ephemeral
         })
       }
+    }
+  }
+})
+
+// Handle voice state updates
+client.on('voiceStateUpdate', (oldState, newState)=>{
+  // Check if the user left a voice channel
+  if(oldState.channelId && !newState.channelId){
+    const voiceChannel = oldState.channel
+    // Check if the channel is empty after the user left
+    if(voiceChannel.members.filter(m=>!m.user.bot).size === 0){
+      // Cleanup party if the voice channel is empty
+      console.log(`Voice channel ${voiceChannel.name} is empty, cleaning up party...`)
+      cleanupParty(oldState.id, voiceChannel.parent.name, oldState.guild)
     }
   }
 })
@@ -350,24 +368,24 @@ async function handleLFGCommand(interaction){
     await textChannel.setTopic(`${interaction.channel.id}\u200B${replyMessage.id}`)
 
     // Auto-cleanup when voice channel becomes empty
-    const checkEmpty = setInterval(()=>{
-      const vc = guild.channels.cache.get(voiceChannel.id)
-      if(!vc || vc.members.size === 0){
-        setTimeout(()=>{
-          const vcRecheck = guild.channels.cache.get(voiceChannel.id)
-          if(!vcRecheck || vcRecheck.members.size === 0){
-            cleanupParty(interaction.user.id, partyName, guild)
-            clearInterval(checkEmpty)
-          }
-        }, 30000) // Wait 30 seconds before cleanup
-      }
-    }, 60000) // Check every minute
+    // const checkEmpty = setInterval(()=>{
+    //   const vc = guild.channels.cache.get(voiceChannel.id)
+    //   if(!vc || vc.members.size === 0){
+    //     setTimeout(()=>{
+    //       const vcRecheck = guild.channels.cache.get(voiceChannel.id)
+    //       if(!vcRecheck || vcRecheck.members.size === 0){
+    //         cleanupParty(interaction.user.id, partyName, guild)
+    //         clearInterval(checkEmpty)
+    //       }
+    //     }, 30000) // Wait 30 seconds before cleanup
+    //   }
+    // }, 60000) // Check every minute
 
     // Cleanup after 24 hours regardless
-    setTimeout(()=>{
-      cleanupParty(partyName, guild)
-      clearInterval(checkEmpty)
-    }, 24 * 60 * 60 * 1000)
+    // setTimeout(()=>{
+    //   cleanupParty(partyName, guild)
+    //   clearInterval(checkEmpty)
+    // }, 24 * 60 * 60 * 1000)
   }catch(error){
     console.error('Error creating party:', error)
     await interaction.editReply({
