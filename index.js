@@ -181,10 +181,9 @@ client.on('interactionCreate', async interaction=>{
       }
       await handleLFGCommand(interaction)
     }else if(interaction.commandName === 'close_party'){
+      console.log(`Closing party: ${interaction.options.getString('category')} by ${interaction.user.tag}`)
       const closed = await cleanupParty(interaction.user.id, interaction.options.getString('category'), interaction.guild)
-      if(!closed) return
-      console.log(`Party closed: ${interaction.options.getString('category')} by ${interaction.user.tag}`)
-      await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
+      if(closed) await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
     }else if(interaction.commandName === 'role'){
       // can have 4 sub commands, add(adds the role to the user), remove(removes it from them), create(admins only, creates a role), destroy(admins only, deletes a role)
       const subCommand = interaction.options.getSubcommand()
@@ -235,10 +234,9 @@ client.on('interactionCreate', async interaction=>{
   }else if(interaction.isButton()){
     if(interaction.customId.startsWith('close_party_')){
       const partyId = interaction.customId.replace('close_party_', '')
+      console.log(`Closing party: ${partyId} by ${interaction.user.tag}`)
       const closed = await cleanupParty(interaction.user.id, partyId, interaction.guild)
-      if(!closed) return
-      console.log(`Party closed: ${partyId} by ${interaction.user.tag}`)
-      await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
+      if(closed) await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
     }
   }else if(interaction.isStringSelectMenu()){
     if(interaction.customId === 'select_game_roles'){
@@ -286,6 +284,9 @@ client.on('interactionCreate', async interaction=>{
 
 // Handle voice state updates
 client.on('voiceStateUpdate', (oldState, newState)=>{
+  // ignore any voice channel whos name doesn't include "party"
+  if(!oldState.channelId || !oldState.channel.name.includes('party')) return
+
   // Check if the user left a voice channel
   if(oldState.channelId && !newState.channelId){
     const voiceChannel = oldState.channel
