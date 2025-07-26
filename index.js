@@ -1,6 +1,6 @@
 require('dotenv').config()
 
-const {Client, GatewayIntentBits, SlashCommandBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, EmbedBuilder, StringSelectMenuBuilder} = require('discord.js')
+const {Client, GatewayIntentBits, SlashCommandBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, EmbedBuilder, StringSelectMenuBuilder, PermissionFlagsBits} = require('discord.js')
 
 // Bot configuration
 const client = new Client({
@@ -8,7 +8,8 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildVoiceStates
-  ]
+  ],
+  allowedMentions: {parse:['users', 'roles'], repliedUser:true}
 })
 
 // Get game roles from the server
@@ -18,7 +19,7 @@ function getGameRoles(guild){
 
 // Get party categories
 function getPartyCategories(guild){
-  return guild.channels.cache.filter(channel=>channel.type === ChannelType.GuildCategory && channel.name.toLowerCase().includes('party'))
+  return guild.channels.cache.filter(channel=>channel.type === ChannelType.GuildCategory && channel.name.endsWith('party'))
 }
 
 // Register slash commands
@@ -160,10 +161,8 @@ client.on('interactionCreate', async interaction=>{
     // return a list of categories that have the word "party" in their name
     const focusedValue = interaction.options.getFocused()
     const categories = getPartyCategories(interaction.guild)
-
     const filtered = categories
       .filter(category=>category.name.toLowerCase().includes(focusedValue.toLowerCase()))
-      .slice(0, 25) // Limit to 25 choices
       .map(c=>({name:c.name, value:c.id}))
     await interaction.respond(filtered)
   }
@@ -183,7 +182,7 @@ client.on('interactionCreate', async interaction=>{
     }else if(interaction.commandName === 'close_party'){
       console.log(`Closing party: ${interaction.options.getString('category')} by ${interaction.user.tag}`)
       const closed = await cleanupParty(interaction.user.id, interaction.options.getString('category'), interaction.guild)
-      if(closed) await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
+      if(closed) await interaction.reply({content:'Party closed.', flags:MessageFlags.Ephemeral})
     }else if(interaction.commandName === 'role'){
       // can have 4 sub commands, add(adds the role to the user), remove(removes it from them), create(admins only, creates a role), destroy(admins only, deletes a role)
       const subCommand = interaction.options.getSubcommand()
@@ -236,7 +235,7 @@ client.on('interactionCreate', async interaction=>{
       const partyId = interaction.customId.replace('close_party_', '')
       console.log(`Closing party: ${partyId} by ${interaction.user.tag}`)
       const closed = await cleanupParty(interaction.user.id, partyId, interaction.guild)
-      if(closed) await interaction.reply({content:'Closing party...', flags:MessageFlags.Ephemeral})
+      if(closed) await interaction.reply({content:'Party closed.', flags:MessageFlags.Ephemeral})
     }
   }else if(interaction.isStringSelectMenu()){
     if(interaction.customId === 'select_game_roles'){
@@ -283,30 +282,29 @@ client.on('interactionCreate', async interaction=>{
 })
 
 // Handle voice state updates
-client.on('voiceStateUpdate', (oldState, newState)=>{
-  // ignore any voice channel whos name doesn't include "party"
-  if(!oldState.channelId || !oldState.channel.name.includes('party')) return
+client.on('voiceStateUpdate', oldState=>{
+  // ignore any voice channel that isn't in a category where the name ends with "party"
+  const voiceChannel = oldState.channel
+  const category = voiceChannel?.parent
+  if(!voiceChannel || !category || !category.name.endsWith('party')) return
 
-  // Check if the user left a voice channel
-  if(oldState.channelId && !newState.channelId){
-    const voiceChannel = oldState.channel
-    // Check if the channel is empty after the user left
-    if(voiceChannel.members.filter(m=>!m.user.bot).size === 0){
-      // Cleanup party if the voice channel is empty
-      console.log(`Voice channel ${voiceChannel.name} is empty, cleaning up party...`)
-      cleanupParty(oldState.id, voiceChannel.parent.name, oldState.guild)
-    }
+  if(voiceChannel.members.filter(m=>!m.user.bot).size === 0){
+    // Cleanup party if the voice channel is empty. Use the bot's ID as the user ID
+    console.log(`Voice channel ${voiceChannel.name} is empty, cleaning up party: ${category.name}`)
+    cleanupParty(client.user.id, category.id, oldState.guild)
   }
 })
 
 // Handle LFG command
 async function handleLFGCommand(interaction){
-  await interaction.deferReply()
-
   const gameName = interaction.options.getString('game').charAt(0).toUpperCase() + interaction.options.getString('game').slice(1)
   const limit = interaction.options.getInteger('limit') || 0
   const shouldPing = interaction.options.getBoolean('ping') ?? true
   const {user} = interaction
+
+  const deferSettings = {}
+  if(!shouldPing) deferSettings.flags = MessageFlags.Ephemeral
+  await interaction.deferReply(deferSettings)
 
   try{
     const {guild} = interaction
@@ -324,6 +322,7 @@ async function handleLFGCommand(interaction){
       type: ChannelType.GuildText,
       parent: category
     })
+    await textChannel.setTopic(`${user.id}`)
 
     // Create voice channel
     const voiceChannel = await guild.channels.create({
@@ -334,14 +333,7 @@ async function handleLFGCommand(interaction){
     })
 
     // Ping users with matching game role if requested
-    let pingMessage = ''
-    if(shouldPing){
-      const gameRole = guild.roles.cache.find(role=>role.name.toLowerCase() === gameName.toLowerCase() && getGameRoles(guild).has(role.id))
-
-      if(gameRole){
-        pingMessage = `\n${gameRole} - New party created!`
-      }
-    }
+    const gameRole = guild.roles.cache.find(role=>role.name.toLowerCase() === gameName.toLowerCase() && getGameRoles(guild).has(role.id)) || ''
 
     // Create embed for the command reply
     const replyEmbed = new EmbedBuilder()
@@ -354,39 +346,24 @@ async function handleLFGCommand(interaction){
       .setColor(0x00AE86)
 
     const closeButton = new ButtonBuilder()
-      .setCustomId(`close_party_${partyName}`)
+      .setCustomId(`close_party_${category.id}`)
       .setLabel('Close Party')
       .setStyle(ButtonStyle.Danger)
 
     const replyMessage = await interaction.editReply({
+      content: gameRole.toString(),
       embeds: [replyEmbed],
-      components: [new ActionRowBuilder().addComponents(closeButton)],
-      content: pingMessage || null,
-      ephemeral: false
+      components: [new ActionRowBuilder().addComponents(closeButton)]
     })
 
     // Store message ID in the text channel description for cleanup
-    await textChannel.setTopic(`${interaction.channel.id}\u200B${replyMessage.id}`)
+    await textChannel.setTopic(`${user.id}\u200B${interaction.channel.id}\u200B${replyMessage.id}`)
 
-    // Auto-cleanup when voice channel becomes empty
-    // const checkEmpty = setInterval(()=>{
-    //   const vc = guild.channels.cache.get(voiceChannel.id)
-    //   if(!vc || vc.members.size === 0){
-    //     setTimeout(()=>{
-    //       const vcRecheck = guild.channels.cache.get(voiceChannel.id)
-    //       if(!vcRecheck || vcRecheck.members.size === 0){
-    //         cleanupParty(interaction.user.id, partyName, guild)
-    //         clearInterval(checkEmpty)
-    //       }
-    //     }, 30000) // Wait 30 seconds before cleanup
-    //   }
-    // }, 60000) // Check every minute
-
-    // Cleanup after 24 hours regardless
-    // setTimeout(()=>{
-    //   cleanupParty(partyName, guild)
-    //   clearInterval(checkEmpty)
-    // }, 24 * 60 * 60 * 1000)
+    setTimeout(async()=>{
+      if(!voiceChannel || voiceChannel.members.size === 0){
+        cleanupParty(client.user.id, category.id, guild)
+      }
+    }, 60000)
   }catch(error){
     console.error('Error creating party:', error)
     await interaction.editReply({
@@ -397,25 +374,44 @@ async function handleLFGCommand(interaction){
 }
 
 // Clean up party channels
-async function cleanupParty(userId, partyName, guild){
-  if(!userId) return
-  if(!partyName) return
-  if(!guild) return
+async function cleanupParty(userId, categoryId, guild){
+  if(!userId){
+    console.warn('cleanupParty called without userId, skipping cleanup')
+    return
+  }
+  if(!categoryId){
+    console.warn('cleanupParty called without categoryId, skipping cleanup')
+    return
+  }
+  if(!guild){
+    console.warn('cleanupParty called without guild, skipping cleanup')
+    return
+  }
 
   try{
-    const category = guild.channels.cache.find(c=>c.type === ChannelType.GuildCategory && c.name == partyName)
-    if(!category) return
+    const category = guild.channels.cache.find(c=>c.type === ChannelType.GuildCategory && c.id === categoryId)
+    if(!category){
+      console.warn(`No category found for party: ${categoryId}`)
+      return
+    }
     const textChannel = category.children.cache.find(c=>c.type === ChannelType.GuildText)
     const voiceChannel = category.children.cache.find(c=>c.type === ChannelType.GuildVoice)
     const topic = textChannel.topic.split('\u200B')
-    const lfgMessageChannel = guild.channels.cache.get(topic[0])
-    const lfgMessage = await lfgMessageChannel.messages.fetch(topic[1])
+    const originalUserId = topic[0]
 
-    if(lfgMessage.interaction.user.id !== userId) return false
+    if(userId !== originalUserId && userId !== client.user.id){
+      console.warn(`User ${userId} is not the original creator of the party ${categoryId}, skipping cleanup, must be ${originalUserId} or ${client.user.id}`)
+      return
+    }
+
+    if(topic.length > 2){
+      const lfgMessageChannel = guild.channels.cache.get(topic[1])
+      const lfgMessage = await lfgMessageChannel.messages.fetch(topic[2])
+      if(!lfgMessage.flags.has(MessageFlags.Ephemeral)) await lfgMessage.delete()
+    }
 
     await textChannel.delete()
     await voiceChannel.delete()
-    await lfgMessage.delete()
     await category.delete()
 
     return true
