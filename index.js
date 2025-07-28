@@ -47,7 +47,36 @@ async function registerCommands(){
       .addStringOption(option=>option.setName('category')
         .setDescription('The category of the party to close')
         .setRequired(true)
-        .setAutocomplete(true))
+        .setAutocomplete(true)),
+
+    new SlashCommandBuilder()
+      .setName('role')
+      .setDescription('Manage roles')
+      .addSubcommand(sub=>sub.setName('add')
+        .setDescription('Add a role to yourself')
+        .addStringOption(option=>option.setName('role')
+          .setDescription('The role to add')
+          .setRequired(true)))
+      .addSubcommand(sub=>sub.setName('remove')
+        .setDescription('Remove a role from yourself')
+        .addStringOption(option=>option.setName('role')
+          .setDescription('The role to remove')
+          .setRequired(true)))
+      .addSubcommand(sub=>sub.setName('create')
+        .setDescription('Create a new role (admins only)')
+        .addStringOption(option=>option.setName('role')
+          .setDescription('The name of the role to create')
+          .setRequired(true)))
+      .addSubcommand(sub=>sub.setName('destroy')
+        .setDescription('Delete a role (admins only)')
+        .addStringOption(option=>option.setName('role')
+          .setDescription('The name of the role to delete')
+          .setRequired(true))),
+
+    new SlashCommandBuilder()
+      .setName('reload')
+      .setDescription('Reload the bot commands and messages')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   ]
 
   try{
@@ -59,68 +88,10 @@ async function registerCommands(){
   }
 }
 
-const remakeRolesChannel = false
-
 // Bot ready event
 client.once('ready', async()=>{
   console.log(`Logged in as ${client.user.tag}!`)
   await registerCommands()
-  if(remakeRolesChannel){
-    const guild = client.guilds.cache.first()
-    // the "get-roles" channel should have a few specific messages. The first is about color roles, the second is for game roles. There should be no other messages.
-    const getRolesChannel = guild.channels.cache.find(c=>c.name === 'get-roles')
-    if(!getRolesChannel) return
-    // remove any existing messages in the channel
-    const messages = await getRolesChannel.messages.fetch()
-    await Promise.all(messages.map(message=>message.delete()))
-    const colors = ['Red', 'Green', 'Blue', 'Yellow', 'Orange', 'Purple', 'Teal', 'Pink']
-    const colorSelectMenu = new ActionRowBuilder()
-      .addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('select_color_role')
-          .setPlaceholder('Select your color role...')
-          .addOptions(
-            colors.map(color=>({
-              label: `${color}`,
-              value: color
-            }))
-          )
-      )
-
-    await getRolesChannel.send({
-      embeds: [{
-        title: '🎨 Color Role',
-        description: '🌈 Changes the color of your username in the server! 🌈',
-        color: 0x5865F2
-      }],
-      components: [colorSelectMenu]
-    })
-
-    const gameRoles = getGameRoles(guild)
-    const gameSelectMenu = new ActionRowBuilder()
-      .addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('select_game_roles')
-          .setPlaceholder('Select your game roles...')
-          .setMinValues(0)
-          .setMaxValues(gameRoles.size)
-          .addOptions(
-            gameRoles.map(role=>({
-              label: `${role.name}`,
-              value: role.id
-            }))
-          )
-      )
-
-    await getRolesChannel.send({
-      embeds: [{
-        title: '🎮 Game Roles',
-        description: '📢 Get notified when people are looking for a group! 📢',
-        color: 0x5865F2
-      }],
-      components: [gameSelectMenu]
-    })
-  }
 })
 
 // Handle regular messages - delete them if they're in the lfg channel
@@ -229,6 +200,87 @@ client.on('interactionCreate', async interaction=>{
           await interaction.reply({content:'❌ You do not have permission to delete roles', ephemeral:true})
         }
       }
+    }else if(interaction.commandName === 'reload'){
+      if(!interaction.member.permissions.has(PermissionFlagsBits.Administrator)){
+        return interaction.reply({
+          content: '❌ You do not have permission to manage messages',
+          flags: MessageFlags.Ephemeral
+        })
+      }
+      await registerCommands()
+      const guild = client.guilds.cache.first()
+      // the "get-roles" channel should have a few specific messages. The first is about color roles, the second is for game roles. There should be no other messages.
+      const rolesChannel = guild.channels.cache.find(c=>c.name === 'get-roles')
+      if(!rolesChannel) return
+      // remove any existing messages in the channel
+      const roleMessages = await rolesChannel.messages.fetch()
+      await Promise.all(roleMessages.map(message=>message.delete()))
+      const colors = ['Red', 'Green', 'Blue', 'Yellow', 'Orange', 'Purple', 'Teal', 'Pink']
+      const colorSelectMenu = new ActionRowBuilder()
+        .addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('select_color_role')
+            .setPlaceholder('Select your color role...')
+            .addOptions(
+              colors.map(color=>({
+                label: `${color}`,
+                value: color
+              }))
+            )
+        )
+
+      await rolesChannel.send({
+        embeds: [{
+          title: '🎨 Color Role',
+          description: '🌈 Changes the color of your username in the server! 🌈',
+          color: 0x5865F2
+        }],
+        components: [colorSelectMenu]
+      })
+
+      const gameRoles = getGameRoles(guild)
+      const gameSelectMenu = new ActionRowBuilder()
+        .addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('select_game_roles')
+            .setPlaceholder('Select your game roles...')
+            .setMinValues(0)
+            .setMaxValues(gameRoles.size)
+            .addOptions(
+              gameRoles.map(role=>({
+                label: `${role.name}`,
+                value: role.id
+              }))
+            )
+        )
+
+      await rolesChannel.send({
+        embeds: [{
+          title: '🎮 Game Roles',
+          description: '📢 Get notified when people are looking for a group! 📢',
+          color: 0x5865F2
+        }],
+        components: [gameSelectMenu]
+      })
+
+      const lfgChannel = guild.channels.cache.find(c=>c.name === 'lfg')
+      if(!lfgChannel) return
+      // find the first message. create/update it to explain the /lfg and /close_party commands
+      const firstMessage = await lfgChannel.messages.fetch({limit:1}).then(messages=>messages.filter(m=>!m.content).first())
+      const lfgMessage = {
+        embeds: [{
+          title: 'Looking for Group (LFG)',
+          description: 'Use the `/lfg` command to create a new party.\nIf your game isn\'t in the list, that\'s ok! A party can be created for anything.\nYou can close your party with the red "Close Party" button, or with the /close_party command.',
+          color: 0x5865F2
+        }]
+      }
+      if(firstMessage) await firstMessage.edit(lfgMessage)
+      else await lfgChannel.send(lfgMessage)
+
+      interaction.reply({
+        content: 'Messages reloaded',
+        flags: MessageFlags.Ephemeral
+      })
     }
   }else if(interaction.isButton()){
     if(interaction.customId.startsWith('close_party_')){
