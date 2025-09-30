@@ -1,6 +1,6 @@
 require('dotenv').config()
 
-const {Client, GatewayIntentBits, SlashCommandBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, EmbedBuilder, StringSelectMenuBuilder, PermissionFlagsBits} = require('discord.js')
+const {Client, GatewayIntentBits, SlashCommandBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionFlagsBits} = require('discord.js')
 
 // Bot configuration
 const client = new Client({
@@ -25,8 +25,7 @@ function getPartyCategories(guild){
 // Register slash commands
 async function registerCommands(){
   const commands = [
-    new SlashCommandBuilder()
-      .setName('lfg')
+    new SlashCommandBuilder().setName('lfg')
       .setDescription('Create a Looking for Group party')
       .addStringOption(option=>option.setName('game')
         .setDescription('The game you want to play')
@@ -41,16 +40,14 @@ async function registerCommands(){
         .setDescription('Ping users with the matching game role (default: true)')
         .setRequired(false)),
 
-    new SlashCommandBuilder()
-      .setName('close_party')
+    new SlashCommandBuilder().setName('close_party')
       .setDescription('Close your party')
-      .addStringOption(option=>option.setName('category')
+      .addStringOption(option=>option.setName('party')
         .setDescription('The category of the party to close')
         .setRequired(true)
         .setAutocomplete(true)),
 
-    new SlashCommandBuilder()
-      .setName('role')
+    new SlashCommandBuilder().setName('role')
       .setDescription('Manage roles')
       .addSubcommand(sub=>sub.setName('add')
         .setDescription('Add a role to yourself')
@@ -73,10 +70,24 @@ async function registerCommands(){
           .setDescription('The name of the role to delete')
           .setRequired(true))),
 
-    new SlashCommandBuilder()
-      .setName('reload')
+    new SlashCommandBuilder().setName('reload')
       .setDescription('Reload the bot commands and messages')
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder().setName('claim')
+      .setDescription('Claim an abandoned party you were previously in')
+      .addStringOption(option=>option.setName('game')
+        .setDescription('The new game name for the party (optional)')
+        .setRequired(false)
+        .setAutocomplete(true))
+      .addIntegerOption(option=>option.setName('limit')
+        .setDescription('Voice channel user limit (default: no limit)')
+        .setRequired(false)
+        .setMinValue(1)
+        .setMaxValue(99))
+      .addBooleanOption(option=>option.setName('ping')
+        .setDescription('Ping users with the matching game role (default: true)')
+        .setRequired(false))
   ]
 
   try{
@@ -117,8 +128,8 @@ client.on('messageCreate', async message=>{
 // Handle autocomplete for game names
 client.on('interactionCreate', async interaction=>{
   if(!interaction.isAutocomplete()) return
-
-  if(interaction.commandName === 'lfg'){
+  const focusedOption = interaction.options.getFocused(true) // { name, value }
+  if(focusedOption.name === 'game'){
     const focusedValue = interaction.options.getFocused()
     const gameRoles = getGameRoles(interaction.guild)
 
@@ -128,7 +139,7 @@ client.on('interactionCreate', async interaction=>{
       .map(r=>({name:r.name, value:r.name}))
 
     await interaction.respond(filtered)
-  }else if(interaction.commandName === 'close_party'){
+  }else if(focusedOption.name === 'party'){
     // return a list of categories that have the word "party" in their name
     const focusedValue = interaction.options.getFocused()
     const categories = getPartyCategories(interaction.guild)
@@ -149,7 +160,7 @@ client.on('interactionCreate', async interaction=>{
           flags: MessageFlags.Ephemeral
         })
       }
-      await handleLFGCommand(interaction)
+      await createParty(interaction)
     }else if(interaction.commandName === 'close_party'){
       console.log(`Closing party: ${interaction.options.getString('category')} by ${interaction.user.tag}`)
       const closed = await cleanupParty(interaction.user.id, interaction.options.getString('category'), interaction.guild)
@@ -281,6 +292,8 @@ client.on('interactionCreate', async interaction=>{
         content: 'Messages reloaded',
         flags: MessageFlags.Ephemeral
       })
+    }else if(interaction.commandName == 'claim'){
+      await claimParty(interaction, interaction.options.getString('game'), interaction.options.getInteger('limit'), interaction.options.getBoolean('ping'))
     }
   }else if(interaction.isButton()){
     if(interaction.customId.startsWith('close_party_')){
@@ -348,10 +361,10 @@ client.on('voiceStateUpdate', oldState=>{
 })
 
 // Handle LFG command
-async function handleLFGCommand(interaction){
+async function createParty(interaction){
   const gameName = interaction.options.getString('game').charAt(0).toUpperCase() + interaction.options.getString('game').slice(1)
   const limit = interaction.options.getInteger('limit') || 0
-  const shouldPing = interaction.options.getBoolean('ping') ?? true
+  let shouldPing = interaction.options.getBoolean('ping') ?? true
   const {user} = interaction
 
   const deferSettings = {}
@@ -386,6 +399,7 @@ async function handleLFGCommand(interaction){
 
     // Ping users with matching game role if requested
     const gameRole = guild.roles.cache.find(role=>role.name.toLowerCase() === gameName.toLowerCase() && getGameRoles(guild).has(role.id)) || ''
+    if(!gameRole) shouldPing = false
 
     // Create embed for the command reply
     const replyEmbed = new EmbedBuilder()
@@ -402,8 +416,9 @@ async function handleLFGCommand(interaction){
       .setLabel('Close Party')
       .setStyle(ButtonStyle.Danger)
 
+    if(shouldPing) await textChannel.send({content:gameRole})
+
     const replyMessage = await interaction.editReply({
-      content: gameRole.toString(),
       embeds: [replyEmbed],
       components: [new ActionRowBuilder().addComponents(closeButton)]
     })
@@ -423,6 +438,46 @@ async function handleLFGCommand(interaction){
       flags: MessageFlags.Ephemeral
     })
   }
+}
+
+// Claim/remake a party
+async function claimParty(interaction, gameName = null, limit = null, shouldPing = true){
+  const {user, guild} = interaction
+  const deferSettings = {flags:MessageFlags.Ephemeral}
+  await interaction.deferReply(deferSettings)
+
+  const category = interaction.channel.parent
+  if(!category || category.type !== ChannelType.GuildCategory) return interaction.editReply({content:'❌ This command can only be used in a party channel or with a valid category ID.'})
+
+  const textChannel = category.children.cache.find(c=>c.type === ChannelType.GuildText)
+  const voiceChannel = category.children.cache.find(c=>c.type === ChannelType.GuildVoice)
+
+  const [originalUserId, interactionChannelId] = textChannel.topic.split('\u200B')
+
+  // check if the original owner is in the vc
+  if(voiceChannel.members.has(originalUserId) && originalUserId !== user.id) return interaction.editReply({content:'❌ This party is still in use.'})
+  if(!voiceChannel.members.has(user.id)) return interaction.editReply({content:'❌ You must be in the party voice channel to claim it.'})
+
+  console.log(`Claiming party: ${category.name} by ${user.displayName}`)
+  gameName = gameName.charAt(0).toUpperCase() + gameName.toLowerCase().slice(1)
+  const interactionChannel = guild.channels.cache.get(interactionChannelId)
+  if(!interactionChannel) return interaction.editReply({content:'❌ Original interaction channel not found, cannot claim party.'})
+
+  const gameRole = guild.roles.cache.find(role=>role.name.toLowerCase() === gameName.toLowerCase() && getGameRoles(guild).has(role.id)) || ''
+
+  if(!gameRole) shouldPing = false
+  if(shouldPing) await textChannel.send({content:gameRole.toString()})
+
+  if(limit !== null) await voiceChannel.setUserLimit(limit)
+
+  // replace the original user's username in the party name
+  const newPartyName = `${user.displayName}'s ${gameName} party`
+  await category.setName(newPartyName)
+  // update the topic to the new user's ID
+  await textChannel.setTopic(`${user.id}\u200B${interactionChannelId}`)
+
+  await interaction.editReply({content:`✅ You have claimed the party: ${category.name}`})
+  return true
 }
 
 // Clean up party channels
