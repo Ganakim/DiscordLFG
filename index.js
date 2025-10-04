@@ -367,9 +367,7 @@ async function createParty(interaction){
   let shouldPing = interaction.options.getBoolean('ping') ?? true
   const {user} = interaction
 
-  const deferSettings = {}
-  if(!shouldPing) deferSettings.flags = MessageFlags.Ephemeral
-  await interaction.deferReply(deferSettings)
+  await interaction.deferReply({flags:MessageFlags.Ephemeral})
 
   try{
     const {guild} = interaction
@@ -416,7 +414,7 @@ async function createParty(interaction){
       .setLabel('Close Party')
       .setStyle(ButtonStyle.Danger)
 
-    if(shouldPing) await textChannel.send({content:gameRole})
+    if(shouldPing) await textChannel.send({content:gameRole.toString()})
 
     const replyMessage = await interaction.editReply({
       embeds: [replyEmbed],
@@ -443,8 +441,7 @@ async function createParty(interaction){
 // Claim/remake a party
 async function claimParty(interaction, gameName = null, limit = null, shouldPing = true){
   const {user, guild} = interaction
-  const deferSettings = {flags:MessageFlags.Ephemeral}
-  await interaction.deferReply(deferSettings)
+  await interaction.deferReply({flags:MessageFlags.Ephemeral})
 
   const category = interaction.channel.parent
   if(!category || category.type !== ChannelType.GuildCategory) return interaction.editReply({content:'❌ This command can only be used in a party channel or with a valid category ID.'})
