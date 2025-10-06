@@ -325,12 +325,9 @@ client.on('interactionCreate', async interaction=>{
       const nonGameRoles = member.roles.cache.filter(role=>!gameRoles.has(role.id))
       // if selected roles includes "none", remove all game roles
       // if selected roles includes "any", remove all game roles and add the "Any" role
-      console.log('selected:', selectedRoles)
       if(selectedRoles.includes('any')){
-        console.log('any:', [...nonGameRoles.values(), guild.roles.cache.find(role=>role.name === 'Any')])
         member.roles.set([...nonGameRoles.values(), guild.roles.cache.find(role=>role.name === 'Any')])
       }else if(selectedRoles.includes('none')){
-        console.log('none:', nonGameRoles.map(r=>r.name))
         member.roles.set(nonGameRoles)
       }else if(selectedRoles.length && !selectedRoles.includes('none') && !selectedRoles.includes('any')){
         selectedRoles.forEach(roleId=>{
@@ -340,7 +337,6 @@ client.on('interactionCreate', async interaction=>{
           if(currentRoles.has(role.id)) currentRoles.delete(role.id)
           else currentRoles.set(role.id, role)
         })
-        console.log('current:', currentRoles.map(r=>r.name))
         member.roles.set([...nonGameRoles.values(), ...currentRoles.values()])
       }
 
