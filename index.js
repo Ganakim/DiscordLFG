@@ -12,9 +12,11 @@ const client = new Client({
   allowedMentions: {parse:['users', 'roles'], repliedUser:true}
 })
 
+const colors = ['Red', 'Green', 'Blue', 'Yellow', 'Orange', 'Purple', 'Teal', 'Pink']
+
 // Get game roles from the server
 function getGameRoles(guild){
-  return guild.roles.cache.filter(role=>role.color === 0 && !['@everyone', 'Admin', 'Moderator', 'Bot', 'PartyFinder'].includes(role.name) && !role.managed)
+  return guild.roles.cache.filter(role=>role.color === 0 && !['@everyone', 'Admin', 'Moderator', 'Bot', 'PartyFinder', 'Any'].includes(role.name) && !role.managed)
 }
 
 // Get party categories
@@ -226,17 +228,22 @@ client.on('interactionCreate', async interaction=>{
       // remove any existing messages in the channel
       const roleMessages = await rolesChannel.messages.fetch()
       await Promise.all(roleMessages.map(message=>message.delete()))
-      const colors = ['Red', 'Green', 'Blue', 'Yellow', 'Orange', 'Purple', 'Teal', 'Pink']
       const colorSelectMenu = new ActionRowBuilder()
         .addComponents(
           new StringSelectMenuBuilder()
             .setCustomId('select_color_role')
             .setPlaceholder('Select your color role...')
             .addOptions(
-              colors.map(color=>({
-                label: `${color}`,
-                value: color
-              }))
+              [
+                {
+                  label: 'None',
+                  value: 'none'
+                },
+                ...colors.map(color=>({
+                  label: color,
+                  value: color
+                }))
+              ]
             )
         )
 
@@ -254,14 +261,20 @@ client.on('interactionCreate', async interaction=>{
         .addComponents(
           new StringSelectMenuBuilder()
             .setCustomId('select_game_roles')
-            .setPlaceholder('Select your game roles...')
+            .setPlaceholder('Select roles to add or remove...')
             .setMinValues(0)
             .setMaxValues(gameRoles.size)
             .addOptions(
-              gameRoles.map(role=>({
-                label: `${role.name}`,
-                value: role.id
-              }))
+              [
+                {
+                  label: 'None',
+                  value: 'none'
+                },
+                ...gameRoles.map(role=>({
+                  label: role.name,
+                  value: role.id
+                }))
+              ]
             )
         )
 
@@ -308,40 +321,50 @@ client.on('interactionCreate', async interaction=>{
       const {member, guild} = interaction
       const gameRoles = getGameRoles(guild)
 
-      // Remove all current game roles
       const currentRoles = member.roles.cache.filter(role=>gameRoles.has(role.id))
-      await member.roles.remove(currentRoles)
+      const nonGameRoles = member.roles.cache.filter(role=>!gameRoles.has(role.id))
+      // if selected roles includes "none", remove all game roles
+      // if selected roles includes "any", remove all game roles and add the "Any" role
+      console.log('selected:', selectedRoles)
+      if(selectedRoles.includes('any')){
+        console.log('any:', [...nonGameRoles.values(), guild.roles.cache.find(role=>role.name === 'Any')])
+        member.roles.set([...nonGameRoles.values(), guild.roles.cache.find(role=>role.name === 'Any')])
+      }else if(selectedRoles.includes('none')){
+        console.log('none:', nonGameRoles.map(r=>r.name))
+        member.roles.set(nonGameRoles)
+      }else if(selectedRoles.length && !selectedRoles.includes('none') && !selectedRoles.includes('any')){
+        selectedRoles.forEach(roleId=>{
+          const role = guild.roles.cache.find(r=>r.id === roleId)
+          if(!role) return
+          // if currentroles has this role, remove it, otherwise add it
+          if(currentRoles.has(role.id)) currentRoles.delete(role.id)
+          else currentRoles.set(role.id, role)
+        })
+        console.log('current:', currentRoles.map(r=>r.name))
+        member.roles.set([...nonGameRoles.values(), ...currentRoles.values()])
+      }
 
-      // Add selected roles
-      const rolesToAdd = selectedRoles.map(roleId=>guild.roles.cache.get(roleId)).filter(role=>role && gameRoles.has(role.id))
-      await member.roles.add(rolesToAdd)
+      // gameRoles.forEach(role=>{
+      //   if(member.roles.cache.has(role.id) && !selectedRoles.includes(role.id)) member.roles.remove(role)
+      // })
+      // if(selectedRoles.includes('any')) member.roles.add(guild.roles.cache.find(role=>role.name === 'Any'))
+      // else if(selectedRoles.length && !selectedRoles.includes('none')) member.roles.add(selectedRoles.map(roleId=>guild.roles.cache.get(roleId)).filter(role=>role && gameRoles.has(role.id)))
+
       await interaction.reply({
-        content: `✅ Updated your game roles: ${rolesToAdd.map(role=>role.name).join(', ')}`,
+        content: '✅ Your game roles have been updated!',
         flags: MessageFlags.Ephemeral
       })
     }else if(interaction.customId === 'select_color_role'){
       const selectedColor = interaction.values[0]
       const {member, guild} = interaction
 
-      // Remove all current color roles
-      const colorRoles = guild.roles.cache.filter(role=>role.color !== 0 && !['@everyone', 'Admin', 'Moderator', 'Bot', 'PartyFinder'].includes(role.name) && !role.managed)
-      const currentRoles = member.roles.cache.filter(role=>colorRoles.has(role.id))
-      await member.roles.remove(currentRoles)
+      member.roles.remove(colors.map(color=>guild.roles.cache.find(role=>role.name === `Color:${color}`)))
+      if(selectedColor !== 'none') member.roles.add(guild.roles.cache.find(role=>role.name === `Color:${selectedColor}`))
 
-      // Add selected color role
-      const roleToAdd = guild.roles.cache.find(role=>role.name === `Color:${selectedColor}`)
-      if(roleToAdd && colorRoles.has(roleToAdd.id)){
-        await member.roles.add(roleToAdd)
-        await interaction.reply({
-          content: `✅ Updated your color role: ${roleToAdd.name}`,
-          flags: MessageFlags.Ephemeral
-        })
-      }else{
-        await interaction.reply({
-          content: '❌ No valid color role selected.',
-          flags: MessageFlags.Ephemeral
-        })
-      }
+      await interaction.reply({
+        content: '✅ Your color role has been updated!',
+        flags: MessageFlags.Ephemeral
+      })
     }
   }
 })
